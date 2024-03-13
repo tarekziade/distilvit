@@ -69,7 +69,8 @@ urls = [
     "http://images.cocodataset.org/annotations/image_info_test2017.zip",
 ]
 
-COCO_DIR = "coco"
+COCO_DIR = os.path.join(os.path.dirname(__file__), "coco")
+
 ignore_pad_token_for_loss = True
 
 
@@ -82,6 +83,7 @@ def tokenization_fn(tokenizer, captions, max_target_length):
     return labels
 
 
+# XXX opens too many FDs, to fix
 # image preprocessing step
 def feature_extraction_fn(feature_extractor, image_paths, check_image=True):
     """
@@ -91,16 +93,14 @@ def feature_extraction_fn(feature_extractor, image_paths, check_image=True):
     """
     if check_image:
         images = []
-        to_keep = []
         for image_file in image_paths:
             try:
-                img = Image.open(image_file)
+                img = Image.open(image_file).convert("RGB")
                 images.append(img)
-                to_keep.append(True)
             except Exception:
-                to_keep.append(False)
+                pass
     else:
-        images = [Image.open(image_file) for image_file in image_paths]
+        images = [Image.open(image_file).convert('RGB') for image_file in image_paths]
 
     encoder_inputs = feature_extractor(images=images, return_tensors="np")
 
@@ -181,9 +181,9 @@ def train():
         download_file(url, COCO_DIR)
     print("Download complete.")
 
-    ds = load_dataset("ydshieh/coco_dataset_script", "2017", data_dir=COCO_DIR)
+    ds = load_dataset("ydshieh/coco_dataset_script", "2017", data_dir=COCO_DIR, trust_remote_code=True)
     ds = ds.map(
-        function=partial(preprocess_fn, feature_extractor),
+        function=partial(preprocess_fn, feature_extractor, tokenizer),
         batched=True,
         fn_kwargs={"max_target_length": 128},
         remove_columns=ds["train"].column_names,
