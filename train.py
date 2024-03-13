@@ -1,6 +1,7 @@
 import requests
 import os
 from functools import partial
+import torch
 
 import nltk
 import evaluate
@@ -16,6 +17,18 @@ from transformers import (
     AutoFeatureExtractor,
     AutoTokenizer,
 )
+
+
+if torch.cuda.is_available():
+    device = torch.device("cuda")
+    print("Using CUDA (Nvidia GPU).")
+elif torch.backends.mps.is_available():
+    device = torch.device("mps")
+    print("Using MPS (Apple Silicon GPU).")
+else:
+    device = torch.device("cpu")
+    print("Using CPU.")
+
 
 os.environ["WANDB_DISABLED"] = "true"
 
@@ -152,6 +165,8 @@ def train():
     model = VisionEncoderDecoderModel.from_encoder_decoder_pretrained(
         image_encoder_model, text_decode_model
     )
+    model.to(device)
+
     tokenizer = AutoTokenizer.from_pretrained(text_decode_model)
     # GPT2 only has bos/eos tokens but not decoder_start/pad tokens
     tokenizer.pad_token = tokenizer.eos_token
