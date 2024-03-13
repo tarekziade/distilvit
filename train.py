@@ -212,5 +212,5 @@ def train():
     tokenizer.save_pretrained("./distilvit")
 
 
-if __name__ == "__main":
+if __name__ == "__main__":
     train()
