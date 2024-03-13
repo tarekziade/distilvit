@@ -12,3 +12,4 @@ huggingface-hub
 Pillow
 nltk
 rouge
+rouge-score
