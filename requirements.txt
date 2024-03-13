@@ -11,3 +11,4 @@ tqdm
 huggingface-hub
 Pillow
 nltk
+rouge
