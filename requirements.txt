@@ -13,3 +13,4 @@ Pillow
 nltk
 rouge
 rouge-score
+absl-py

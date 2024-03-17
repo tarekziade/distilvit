@@ -2,7 +2,6 @@ import requests
 import os
 from functools import partial
 import torch
-import hashlib
 from collections.abc import Mapping
 
 import nltk
@@ -11,9 +10,7 @@ import numpy as np
 from PIL import Image
 from datasets import load_dataset, load_from_disk
 from tqdm import tqdm
-from transformers import DataCollatorForSeq2Seq, PreTrainedTokenizerBase, DataCollatorWithPadding
 from transformers import (
-    default_data_collator,
     Seq2SeqTrainer,
     Seq2SeqTrainingArguments,
     VisionEncoderDecoderModel,
@@ -73,16 +70,14 @@ urls = [
 
 COCO_DIR = os.path.join(os.path.dirname(__file__), "coco")
 CACHED_DS = os.path.join(os.path.dirname(__file__), "cache", "dataset")
+MAX_LENGTH = 128
+CHECKPOINTS_DIR = os.path.join(os.path.dirname(__file__), "checkpoints")
+SAVE_PATH = "./distilvit"
 
 
-ignore_pad_token_for_loss = True
-
-
-def tokenization_fn(tokenizer, captions, max_target_length):
+def tokenization_fn(tokenizer, captions):
     """Run tokenization on captions."""
-    labels = tokenizer(
-        captions, padding="max_length", max_length=max_target_length
-    ).input_ids
+    labels = tokenizer(captions, padding="max_length", max_length=MAX_LENGTH).input_ids
 
     return labels
 
@@ -96,32 +91,26 @@ def extract_features(image_paths, feature_extractor):
             pass
 
     inputs = feature_extractor(images=images, return_tensors="pt")
-    #torch.save(inputs, save_path)
     for image in images:
         image.close()
     return inputs
 
 
-# XXX opens too many FDs, to fix
-# image preprocessing step
-def feature_extraction_fn(feature_extractor, image_paths):
-    features = extract_features(image_paths, feature_extractor)
-    return features['pixel_values']
-
-
 def preprocess_fn(
-    feature_extractor, tokenizer, examples, max_target_length, check_image=True
+    feature_extractor,
+    tokenizer,
+    examples,
 ):
     """Run tokenization + image feature extraction"""
     image_paths = examples["image_path"]
     captions = examples["caption"]
-
     model_inputs = {}
-    # This contains image path column
-    model_inputs["labels"] = tokenization_fn(tokenizer, captions, max_target_length)
-    model_inputs["pixel_values"] = feature_extraction_fn(
-        feature_extractor, image_paths, 
-    )
+    model_inputs["labels"] = tokenization_fn(tokenizer, captions)
+    model_inputs["pixel_values"] = extract_features(
+        feature_extractor,
+        image_paths,
+    )["pixel_values"]
+
     return model_inputs
 
 
@@ -139,14 +128,9 @@ def compute_metrics(tokenizer, metric, eval_preds):
     if isinstance(preds, tuple):
         preds = preds[0]
     decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
-    if ignore_pad_token_for_loss:
-        # Replace -100 in the labels as we can't decode them.
-        labels = np.where(labels != -100, labels, tokenizer.pad_token_id)
+    labels = np.where(labels != -100, labels, tokenizer.pad_token_id)
     decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
-
-    # Some simple post-processing
     decoded_preds, decoded_labels = postprocess_text(decoded_preds, decoded_labels)
-
     result = metric.compute(
         predictions=decoded_preds, references=decoded_labels, use_stemmer=True
     )
@@ -158,25 +142,29 @@ def compute_metrics(tokenizer, metric, eval_preds):
     return result
 
 
-def torch_data_collator(tokenizer, features):
+def data_collator(tokenizer, features):
     if not isinstance(features[0], Mapping):
         features = [vars(f) for f in features]
     first = features[0]
     batch = {}
-
-    # Special handling for labels.
-    # Ensure that tensor is created with the correct type
-    # (it should be automatically the case, but let's make sure of it.)
     if "label" in first and first["label"] is not None:
-        label = first["label"].item() if isinstance(first["label"], torch.Tensor) else first["label"]
+        label = (
+            first["label"].item()
+            if isinstance(first["label"], torch.Tensor)
+            else first["label"]
+        )
         dtype = torch.long if isinstance(label, int) else torch.float
         batch["labels"] = torch.tensor([f["label"] for f in features], dtype=dtype)
     elif "label_ids" in first and first["label_ids"] is not None:
         if isinstance(first["label_ids"], torch.Tensor):
             batch["labels"] = torch.stack([f["label_ids"] for f in features])
         else:
-            dtype = torch.long if isinstance(first["label_ids"][0], int) else torch.float
-            batch["labels"] = torch.tensor([f["label_ids"] for f in features], dtype=dtype)
+            dtype = (
+                torch.long if isinstance(first["label_ids"][0], int) else torch.float
+            )
+            batch["labels"] = torch.tensor(
+                [f["label_ids"] for f in features], dtype=dtype
+            )
 
     # Handling of all other possible keys.
     # Again, we will use the first element to figure out which key/values are not None for this model.
@@ -187,17 +175,22 @@ def torch_data_collator(tokenizer, features):
             elif isinstance(v, np.ndarray):
                 batch[k] = torch.tensor(np.stack([f[k] for f in features]))
             else:
+                # make sure we pad or truncate
                 if k == "labels":
                     truncated_features = []
                     for f in features:
                         item = f[k]
                         if len(item) != 128:
-                            print(f"Found item of size {len(item)}), truncating or padding")
+                            print(
+                                f"Found item of size {len(item)}), truncating or padding"
+                            )
                             if len(item) > 128:
                                 item = item[:128]
                             else:
-                                item = item + [tokenizer.pad_token_id] * (128-len(item))
-                            
+                                item = item + [tokenizer.pad_token_id] * (
+                                    128 - len(item)
+                                )
+
                             assert len(item) == 128
 
                         truncated_features.append(item)
@@ -207,6 +200,34 @@ def torch_data_collator(tokenizer, features):
                     batch[k] = torch.tensor([f[k] for f in features])
     return batch
 
+
+def get_dataset(tokenizer, feature_extractor):
+    """Downloads the COCO dataset and tokenizes it.
+
+    The result is saved on disk so we can reuse it.
+    """
+    if os.path.exists(CACHED_DS):
+        ds = load_from_disk(CACHED_DS)
+    else:
+        for url in urls:
+            print(f"Downloading {url}...")
+            download_file(url, COCO_DIR)
+        print("Download complete.")
+
+        ds = load_dataset(
+            "ydshieh/coco_dataset_script",
+            "2017",
+            data_dir=COCO_DIR,
+            trust_remote_code=True,
+        )
+        ds = ds.map(
+            function=partial(preprocess_fn, feature_extractor, tokenizer),
+            batched=True,
+            remove_columns=ds["train"].column_names,
+        )
+        # save the mapped dataset so we can reuse it
+        ds.save_to_disk(CACHED_DS)
+    return ds
 
 
 def train():
@@ -229,36 +250,18 @@ def train():
     model.config.decoder_start_token_id = tokenizer.bos_token_id
     model.config.pad_token_id = tokenizer.pad_token_id
 
-
-    if os.path.exists(CACHED_DS):
-        ds = load_from_disk(CACHED_DS)
-    else:
-        for url in urls:
-            print(f"Downloading {url}...")
-            download_file(url, COCO_DIR)
-        print("Download complete.")
-
-        ds = load_dataset("ydshieh/coco_dataset_script", "2017", data_dir=COCO_DIR, trust_remote_code=True)
-        ds = ds.map(
-            function=partial(preprocess_fn, feature_extractor, tokenizer),
-            batched=True,
-            fn_kwargs={"max_target_length": 128},
-            remove_columns=ds["train"].column_names,
-        )
-
-        # save the mapped dataset so we can reuse it
-        ds.save_to_disk(CACHED_DS)
+    ds = get_dataset(tokenizer, feature_extractor)
 
     training_args = Seq2SeqTrainingArguments(
         predict_with_generate=True,
         evaluation_strategy="epoch",
         per_device_train_batch_size=4,
         per_device_eval_batch_size=4,
-        output_dir="./image-captioning-output",
-        save_total_limit=10
+        output_dir=CHECKPOINTS_DIR,
+        save_total_limit=10,
     )
-    
-    last_checkpoint = get_last_checkpoint("./image-captioning-output")
+
+    last_checkpoint = get_last_checkpoint(CHECKPOINTS_DIR)
 
     trainer = Seq2SeqTrainer(
         model=model,
@@ -267,14 +270,14 @@ def train():
         compute_metrics=partial(compute_metrics, tokenizer, metric),
         train_dataset=ds["train"],
         eval_dataset=ds["validation"],
-        data_collator=partial(torch_data_collator, tokenizer)
+        data_collator=partial(data_collator, tokenizer),
     )
     if last_checkpoint is not None:
         trainer.train(resume_from_checkpoint=last_checkpoint)
     else:
         trainer.train()
-    trainer.save_model("./distilvit")
-    tokenizer.save_pretrained("./distilvit")
+    trainer.save_model(SAVE_PATH)
+    tokenizer.save_pretrained(SAVE_PATH)
 
 
 if __name__ == "__main__":
