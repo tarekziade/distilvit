@@ -134,15 +134,15 @@ from coco import get_dataset as get_coco_dataset
 def train():
     metric = evaluate.load("rouge")
     image_encoder_model = "google/vit-base-patch16-224-in21k"
-    text_decode_model = "distilbert/distilgpt2"
+    text_decoder_model = "distilbert/distilgpt2"
 
     feature_extractor = AutoFeatureExtractor.from_pretrained(image_encoder_model)
     model = VisionEncoderDecoderModel.from_encoder_decoder_pretrained(
-        image_encoder_model, text_decode_model
+        image_encoder_model, text_decoder_model
     )
     model.to(device)
 
-    tokenizer = AutoTokenizer.from_pretrained(text_decode_model)
+    tokenizer = AutoTokenizer.from_pretrained(text_decoder_model)
     # GPT2 only has bos/eos tokens but not decoder_start/pad tokens
     tokenizer.pad_token = tokenizer.eos_token
 
@@ -151,7 +151,7 @@ def train():
     model.config.decoder_start_token_id = tokenizer.bos_token_id
     model.config.pad_token_id = tokenizer.pad_token_id
 
-    ds = get_coco_dataset()
+    ds = get_coco_dataset(image_encoder_model, text_decoder_model)
 
     training_args = Seq2SeqTrainingArguments(
         predict_with_generate=True,

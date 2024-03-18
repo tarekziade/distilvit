@@ -1,3 +1,6 @@
+"""
+Tokenizes the Flickr30k dataset
+"""
 from datasets import load_dataset, load_from_disk
 from functools import partial
 import os
@@ -31,16 +34,14 @@ def preprocess_fn(
     return model_inputs
 
 
-def get_dataset():
+def get_dataset(image_encoder_model, text_decoder_model):
     image_encoder_model = "google/vit-base-patch16-224-in21k"
 
     ds = load_dataset("nlphuji/flickr30k")
     ds = ds["test"].train_test_split(test_size=0.2)
 
-    text_decode_model = "distilbert/distilgpt2"
     feature_extractor = AutoFeatureExtractor.from_pretrained(image_encoder_model)
-
-    tokenizer = AutoTokenizer.from_pretrained(text_decode_model)
+    tokenizer = AutoTokenizer.from_pretrained(text_decoder_model)
     tokenizer.pad_token = tokenizer.eos_token
 
     ds = ds.map(

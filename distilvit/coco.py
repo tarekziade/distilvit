@@ -1,10 +1,9 @@
 """
-
+Downloads COCO and creates a tokenized one with extracted features.
 """
 import requests
 import os
 from functools import partial
-import torch
 from collections.abc import Mapping
 
 import nltk
@@ -16,7 +15,6 @@ from transformers import (
     AutoFeatureExtractor,
     AutoTokenizer,
 )
-from transformers.trainer_utils import get_last_checkpoint
 
 
 try:
@@ -102,15 +100,13 @@ def preprocess_fn(
     return model_inputs
 
 
-def get_dataset():
+def get_dataset(image_encoder_model, text_decoder_model):
     """Downloads the COCO dataset and tokenizes it.
 
     The result is saved on disk so we can reuse it.
     """
-    text_decode_model = "distilbert/distilgpt2"
     feature_extractor = AutoFeatureExtractor.from_pretrained(image_encoder_model)
-
-    tokenizer = AutoTokenizer.from_pretrained(text_decode_model)
+    tokenizer = AutoTokenizer.from_pretrained(text_decoder_model)
     tokenizer.pad_token = tokenizer.eos_token
 
     if os.path.exists(CACHED_DS):
@@ -134,4 +130,5 @@ def get_dataset():
         )
         # save the mapped dataset so we can reuse it
         ds.save_to_disk(CACHED_DS)
+
     return ds
