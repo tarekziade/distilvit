@@ -69,7 +69,7 @@ urls = [
 ]
 
 COCO_DIR = os.path.join(os.path.dirname(__file__), "coco")
-CACHED_DS = os.path.join(os.path.dirname(__file__), "cache", "dataset")
+CACHED_DS = os.path.join(os.path.dirname(__file__), "cache", "coco")
 MAX_LENGTH = 128
 CHECKPOINTS_DIR = os.path.join(os.path.dirname(__file__), "checkpoints")
 SAVE_PATH = "./distilvit"
@@ -201,11 +201,17 @@ def data_collator(tokenizer, features):
     return batch
 
 
-def get_dataset(tokenizer, feature_extractor):
+def get_dataset():
     """Downloads the COCO dataset and tokenizes it.
 
     The result is saved on disk so we can reuse it.
     """
+    text_decode_model = "distilbert/distilgpt2"
+    feature_extractor = AutoFeatureExtractor.from_pretrained(image_encoder_model)
+
+    tokenizer = AutoTokenizer.from_pretrained(text_decode_model)
+    tokenizer.pad_token = tokenizer.eos_token
+
     if os.path.exists(CACHED_DS):
         ds = load_from_disk(CACHED_DS)
     else:
@@ -228,57 +234,3 @@ def get_dataset(tokenizer, feature_extractor):
         # save the mapped dataset so we can reuse it
         ds.save_to_disk(CACHED_DS)
     return ds
-
-
-def train():
-    metric = evaluate.load("rouge")
-    image_encoder_model = "google/vit-base-patch16-224-in21k"
-    text_decode_model = "distilbert/distilgpt2"
-
-    feature_extractor = AutoFeatureExtractor.from_pretrained(image_encoder_model)
-    model = VisionEncoderDecoderModel.from_encoder_decoder_pretrained(
-        image_encoder_model, text_decode_model
-    )
-    model.to(device)
-
-    tokenizer = AutoTokenizer.from_pretrained(text_decode_model)
-    # GPT2 only has bos/eos tokens but not decoder_start/pad tokens
-    tokenizer.pad_token = tokenizer.eos_token
-
-    # update the model config
-    model.config.eos_token_id = tokenizer.eos_token_id
-    model.config.decoder_start_token_id = tokenizer.bos_token_id
-    model.config.pad_token_id = tokenizer.pad_token_id
-
-    ds = get_dataset(tokenizer, feature_extractor)
-
-    training_args = Seq2SeqTrainingArguments(
-        predict_with_generate=True,
-        evaluation_strategy="epoch",
-        per_device_train_batch_size=4,
-        per_device_eval_batch_size=4,
-        output_dir=CHECKPOINTS_DIR,
-        save_total_limit=10,
-    )
-
-    last_checkpoint = get_last_checkpoint(CHECKPOINTS_DIR)
-
-    trainer = Seq2SeqTrainer(
-        model=model,
-        tokenizer=feature_extractor,
-        args=training_args,
-        compute_metrics=partial(compute_metrics, tokenizer, metric),
-        train_dataset=ds["train"],
-        eval_dataset=ds["validation"],
-        data_collator=partial(data_collator, tokenizer),
-    )
-    if last_checkpoint is not None:
-        trainer.train(resume_from_checkpoint=last_checkpoint)
-    else:
-        trainer.train()
-    trainer.save_model(SAVE_PATH)
-    tokenizer.save_pretrained(SAVE_PATH)
-
-
-if __name__ == "__main__":
-    train()

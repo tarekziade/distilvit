@@ -31,22 +31,22 @@ def preprocess_fn(
     return model_inputs
 
 
-image_encoder_model = "google/vit-base-patch16-224-in21k"
+def get_dataset():
+    image_encoder_model = "google/vit-base-patch16-224-in21k"
 
-ds = load_dataset("nlphuji/flickr30k")
-ds = ds["test"].train_test_split(test_size=0.2)
+    ds = load_dataset("nlphuji/flickr30k")
+    ds = ds["test"].train_test_split(test_size=0.2)
 
-text_decode_model = "distilbert/distilgpt2"
-feature_extractor = AutoFeatureExtractor.from_pretrained(image_encoder_model)
+    text_decode_model = "distilbert/distilgpt2"
+    feature_extractor = AutoFeatureExtractor.from_pretrained(image_encoder_model)
 
-tokenizer = AutoTokenizer.from_pretrained(text_decode_model)
-tokenizer.pad_token = tokenizer.eos_token
+    tokenizer = AutoTokenizer.from_pretrained(text_decode_model)
+    tokenizer.pad_token = tokenizer.eos_token
 
-
-ds = ds.map(
-    function=partial(preprocess_fn, feature_extractor, tokenizer),
-    batched=True,
-    remove_columns=ds["train"].column_names,
-)
-# save the mapped dataset so we can reuse it
-ds.save_to_disk(CACHED_DS)
+    ds = ds.map(
+        function=partial(preprocess_fn, feature_extractor, tokenizer),
+        batched=True,
+        remove_columns=ds["train"].column_names,
+    )
+    ds.save_to_disk(CACHED_DS)
+    return ds
