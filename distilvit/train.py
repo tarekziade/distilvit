@@ -72,6 +72,7 @@ def compute_metrics(tokenizer, metric, eval_preds):
 
 
 def data_collator(tokenizer, features):
+    # XXX change this so it also works with flickr's labels_0, labels_1 etc
     if not isinstance(features[0], Mapping):
         features = [vars(f) for f in features]
     first = features[0]
