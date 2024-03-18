@@ -2,6 +2,7 @@ import os
 from functools import partial
 import torch
 from collections.abc import Mapping
+import argparse
 
 import nltk
 import evaluate
@@ -133,7 +134,10 @@ _DATASETS = {"coco": get_coco_dataset, "flickr": get_flickr_dataset}
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Train a Vision Encoder Decoder Model")
+    parser = argparse.ArgumentParser(
+        description="Train a Vision Encoder Decoder Model",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
     parser.add_argument(
         "--base-model",
         default="google/vit-base-patch16-224-in21k",
@@ -203,5 +207,9 @@ def train(args):
     tokenizer.save_pretrained(SAVE_PATH)
 
 
-if __name__ == "__main__":
+def main():
     train(parse_args())
+
+
+if __name__ == "__main__":
+    main()
