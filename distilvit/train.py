@@ -33,7 +33,10 @@ except (LookupError, OSError):
     nltk.download("punkt", quiet=True)
 
 
-COCO_DIR = os.path.join(os.path.dirname(__file__), "coco")
+from .coco import get_dataset as get_coco_dataset
+from .flickr import get_dataset as get_flickr_dataset
+
+
 MAX_LENGTH = 128
 CHECKPOINTS_DIR = os.path.join(os.path.dirname(__file__), "checkpoints")
 SAVE_PATH = "./distilvit"
@@ -126,19 +129,39 @@ def data_collator(tokenizer, features):
     return batch
 
 
-from coco import get_dataset as get_coco_dataset
-
-# from flickr import get_dataset as get_flickr_dataset
+_DATASETS = {"coco": get_coco_dataset, "flickr": get_flickr_dataset}
 
 
-def train():
+def parse_args():
+    parser = argparse.ArgumentParser(description="Train a Vision Encoder Decoder Model")
+    parser.add_argument(
+        "--base-model",
+        default="google/vit-base-patch16-224-in21k",
+        type=str,
+        help="Base model for the encoder",
+    )
+    parser.add_argument(
+        "--text-decoder-model",
+        default="distilbert/distilgpt2",
+        type=str,
+        help="Model for the text decoder",
+    )
+    parser.add_argument(
+        "--dataset",
+        default="coco",
+        choices=["coco", "flickr"],
+        help="Dataset to use for training",
+    )
+    return parser.parse_args()
+
+
+def train(args):
+    base_model = args.base_model
+    text_decoder_model = args.text_decoder_model
     metric = evaluate.load("rouge")
-    image_encoder_model = "google/vit-base-patch16-224-in21k"
-    text_decoder_model = "distilbert/distilgpt2"
-
-    feature_extractor = AutoFeatureExtractor.from_pretrained(image_encoder_model)
+    feature_extractor = AutoFeatureExtractor.from_pretrained(base_model)
     model = VisionEncoderDecoderModel.from_encoder_decoder_pretrained(
-        image_encoder_model, text_decoder_model
+        base_model, text_decoder_model
     )
     model.to(device)
 
@@ -151,8 +174,7 @@ def train():
     model.config.decoder_start_token_id = tokenizer.bos_token_id
     model.config.pad_token_id = tokenizer.pad_token_id
 
-    ds = get_coco_dataset(image_encoder_model, text_decoder_model)
-
+    ds = _DATASETS[args.dataset](base_model, text_decoder_model)
     training_args = Seq2SeqTrainingArguments(
         predict_with_generate=True,
         evaluation_strategy="epoch",
@@ -182,4 +204,4 @@ def train():
 
 
 if __name__ == "__main__":
-    train()
+    train(parse_args())
