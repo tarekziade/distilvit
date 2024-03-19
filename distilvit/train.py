@@ -15,6 +15,7 @@ from transformers import (
     AutoTokenizer,
 )
 from transformers.trainer_utils import get_last_checkpoint
+from datasets import concatenate_datasets, DatasetDict
 
 
 if torch.cuda.is_available():
@@ -123,7 +124,7 @@ def data_collator(tokenizer, features):
                                     MAX_LENGTH - len(item)
                                 )
 
-                            assert len(item) == 128
+                            assert len(item) == MAX_LENGTH
 
                         truncated_features.append(item)
 
@@ -199,8 +200,10 @@ def train(args):
     if args.dataset == "both":
         ds = _DATASETS["coco"](args.feature_extractor_model, args.decoder_model)
         ds2 = _DATASETS["flickr"](args.feature_extractor_model, args.decoder_model)
-        ds = concatenate_datasets([ds, ds2])
-        ds = ds.shuffle(seed=42)
+        combined = DatasetDict()
+        for split in ds.keys():
+            combined[split] = concatenate_datasets([ds[split], ds2[split]])
+        ds = combined.shuffle(seed=42)
     else:
         ds = _DATASETS[args.dataset](args.feature_extractor_model, args.decoder_model)
 

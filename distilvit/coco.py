@@ -55,7 +55,8 @@ urls = [
 ]
 
 COCO_DIR = os.path.join(os.path.dirname(__file__), "..", "coco")
-CACHED_DS = os.path.join(os.path.dirname(__file__), "..", "cache", "coco")
+CACHED_DS = "/media/user/Extreme SSD/cache/coco"
+#os.path.join(os.path.dirname(__file__), "..", "cache", "coco")
 MAX_LENGTH = 128
 CHECKPOINTS_DIR = os.path.join(os.path.dirname(__file__), "checkpoints")
 SAVE_PATH = "./distilvit"
@@ -68,7 +69,7 @@ def tokenization_fn(tokenizer, captions):
     return labels
 
 
-def extract_features(image_paths, feature_extractor):
+def extract_features(feature_extractor, image_paths):
     images = []
     for image_path in image_paths:
         try:
