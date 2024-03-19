@@ -54,8 +54,8 @@ urls = [
     "http://images.cocodataset.org/annotations/image_info_test2017.zip",
 ]
 
-COCO_DIR = os.path.join(os.path.dirname(__file__), "coco")
-CACHED_DS = os.path.join(os.path.dirname(__file__), "cache", "coco")
+COCO_DIR = os.path.join(os.path.dirname(__file__), "..", "coco")
+CACHED_DS = os.path.join(os.path.dirname(__file__), "..", "cache", "coco")
 MAX_LENGTH = 128
 CHECKPOINTS_DIR = os.path.join(os.path.dirname(__file__), "checkpoints")
 SAVE_PATH = "./distilvit"
@@ -100,35 +100,35 @@ def preprocess_fn(
     return model_inputs
 
 
-def get_dataset(image_encoder_model, text_decoder_model):
+def get_dataset(feature_extractor_model, text_decoder_model):
     """Downloads the COCO dataset and tokenizes it.
 
     The result is saved on disk so we can reuse it.
     """
-    feature_extractor = AutoFeatureExtractor.from_pretrained(image_encoder_model)
+    if os.path.exists(CACHED_DS):
+        return load_from_disk(CACHED_DS)
+
+    feature_extractor = AutoFeatureExtractor.from_pretrained(feature_extractor_model)
     tokenizer = AutoTokenizer.from_pretrained(text_decoder_model)
     tokenizer.pad_token = tokenizer.eos_token
 
-    if os.path.exists(CACHED_DS):
-        ds = load_from_disk(CACHED_DS)
-    else:
-        for url in urls:
-            print(f"Downloading {url}...")
-            download_file(url, COCO_DIR)
-        print("Download complete.")
+    for url in urls:
+        print(f"Downloading {url}...")
+        download_file(url, COCO_DIR)
+    print("Download complete.")
 
-        ds = load_dataset(
-            "ydshieh/coco_dataset_script",
-            "2017",
-            data_dir=COCO_DIR,
-            trust_remote_code=True,
-        )
-        ds = ds.map(
-            function=partial(preprocess_fn, feature_extractor, tokenizer),
-            batched=True,
-            remove_columns=ds["train"].column_names,
-        )
-        # save the mapped dataset so we can reuse it
-        ds.save_to_disk(CACHED_DS)
+    ds = load_dataset(
+        "ydshieh/coco_dataset_script",
+        "2017",
+        data_dir=COCO_DIR,
+        trust_remote_code=True,
+    )
+    ds = ds.map(
+        function=partial(preprocess_fn, feature_extractor, tokenizer),
+        batched=True,
+        remove_columns=ds["train"].column_names,
+    )
+    # save the mapped dataset so we can reuse it
+    ds.save_to_disk(CACHED_DS)
 
     return ds

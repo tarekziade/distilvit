@@ -39,8 +39,10 @@ from .flickr import get_dataset as get_flickr_dataset
 
 
 MAX_LENGTH = 128
-CHECKPOINTS_DIR = os.path.join(os.path.dirname(__file__), "checkpoints")
-SAVE_PATH = "./distilvit"
+CHECKPOINTS_DIR = os.path.join(os.path.dirname(__file__), "..", "checkpoints")
+os.makedirs(CHECKPOINTS_DIR, exist_ok=True)
+
+SAVE_PATH = "../distilvit-flickr"
 
 
 def postprocess_text(preds, labels):
@@ -110,15 +112,15 @@ def data_collator(tokenizer, features):
                     truncated_features = []
                     for f in features:
                         item = f[k]
-                        if len(item) != 128:
+                        if len(item) != MAX_LENGTH:
                             print(
                                 f"Found item of size {len(item)}), truncating or padding"
                             )
-                            if len(item) > 128:
-                                item = item[:128]
+                            if len(item) > MAX_LENGTH:
+                                item = item[:MAX_LENGTH]
                             else:
                                 item = item + [tokenizer.pad_token_id] * (
-                                    128 - len(item)
+                                    MAX_LENGTH - len(item)
                                 )
 
                             assert len(item) == 128
@@ -140,37 +142,52 @@ def parse_args():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
-        "--base-model",
+        "--encoder-model",
         default="google/vit-base-patch16-224-in21k",
         type=str,
         help="Base model for the encoder",
     )
     parser.add_argument(
-        "--text-decoder-model",
+        "--base-model",
+        default=None,
+        type=str,
+        help="Base model to train again from",
+    )
+    parser.add_argument(
+        "--feature-extractor-model",
+        default="google/vit-base-patch16-224-in21k",
+        type=str,
+        help="Feature extractor model for the encoder",
+    )
+    parser.add_argument(
+        "--decoder-model",
         default="distilbert/distilgpt2",
         type=str,
-        help="Model for the text decoder",
+        help="Model for the decoder",
     )
     parser.add_argument(
         "--dataset",
         default="coco",
-        choices=["coco", "flickr"],
+        choices=["coco", "flickr", "both"],
         help="Dataset to use for training",
     )
     return parser.parse_args()
 
 
 def train(args):
-    base_model = args.base_model
-    text_decoder_model = args.text_decoder_model
     metric = evaluate.load("rouge")
-    feature_extractor = AutoFeatureExtractor.from_pretrained(base_model)
-    model = VisionEncoderDecoderModel.from_encoder_decoder_pretrained(
-        base_model, text_decoder_model
+    feature_extractor = AutoFeatureExtractor.from_pretrained(
+        args.feature_extractor_model
     )
+    if args.base_model:
+        model = VisionEncoderDecoderModel.from_pretrained(args.base_model)
+    else:
+        model = VisionEncoderDecoderModel.from_encoder_decoder_pretrained(
+            args.encoder_model, args.decoder_model
+        )
     model.to(device)
 
-    tokenizer = AutoTokenizer.from_pretrained(text_decoder_model)
+    tokenizer = AutoTokenizer.from_pretrained(args.decoder_model)
     # GPT2 only has bos/eos tokens but not decoder_start/pad tokens
     tokenizer.pad_token = tokenizer.eos_token
 
@@ -179,7 +196,14 @@ def train(args):
     model.config.decoder_start_token_id = tokenizer.bos_token_id
     model.config.pad_token_id = tokenizer.pad_token_id
 
-    ds = _DATASETS[args.dataset](base_model, text_decoder_model)
+    if args.dataset == "both":
+        ds = _DATASETS["coco"](args.feature_extractor_model, args.decoder_model)
+        ds2 = _DATASETS["flickr"](args.feature_extractor_model, args.decoder_model)
+        ds = concatenate_datasets([ds, ds2])
+        ds = ds.shuffle(seed=42)
+    else:
+        ds = _DATASETS[args.dataset](args.feature_extractor_model, args.decoder_model)
+
     training_args = Seq2SeqTrainingArguments(
         predict_with_generate=True,
         evaluation_strategy="epoch",
