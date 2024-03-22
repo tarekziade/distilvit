@@ -56,7 +56,7 @@ urls = [
 
 COCO_DIR = os.path.join(os.path.dirname(__file__), "..", "coco")
 CACHED_DS = "/media/user/Extreme SSD/cache/coco"
-#os.path.join(os.path.dirname(__file__), "..", "cache", "coco")
+# os.path.join(os.path.dirname(__file__), "..", "cache", "coco")
 MAX_LENGTH = 128
 CHECKPOINTS_DIR = os.path.join(os.path.dirname(__file__), "checkpoints")
 SAVE_PATH = "./distilvit"

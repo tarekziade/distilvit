@@ -43,7 +43,7 @@ MAX_LENGTH = 128
 CHECKPOINTS_DIR = os.path.join(os.path.dirname(__file__), "..", "checkpoints")
 os.makedirs(CHECKPOINTS_DIR, exist_ok=True)
 
-SAVE_PATH = "../distilvit-flickr"
+SAVE_DIR = os.path.join(os.path.dirname(__file__), "..")
 
 
 def postprocess_text(preds, labels):
@@ -197,6 +197,11 @@ def train(args):
     model.config.decoder_start_token_id = tokenizer.bos_token_id
     model.config.pad_token_id = tokenizer.pad_token_id
 
+    save_path = os.path.join(
+        SAVE_DIR,
+        f"{args.encoder_model.split('/')[-1]}-{args.decoder_model.split('/')[-1]}",
+    )
+
     if args.dataset == "both":
         ds = _DATASETS["coco"](args.feature_extractor_model, args.decoder_model)
         ds2 = _DATASETS["flickr"](args.feature_extractor_model, args.decoder_model)
@@ -231,8 +236,9 @@ def train(args):
         trainer.train(resume_from_checkpoint=last_checkpoint)
     else:
         trainer.train()
-    trainer.save_model(SAVE_PATH)
-    tokenizer.save_pretrained(SAVE_PATH)
+    trainer.save_model(save_path)
+    tokenizer.save_pretrained(save_path)
+    print(f"Model saved to {save_path}")
 
 
 def main():
