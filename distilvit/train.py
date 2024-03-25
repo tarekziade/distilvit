@@ -37,13 +37,10 @@ except (LookupError, OSError):
 
 from .coco import get_dataset as get_coco_dataset
 from .flickr import get_dataset as get_flickr_dataset
+from .textcaps import get_dataset as get_textcaps_dataset
 
-
+ROOT_DIR = os.path.join(os.path.dirname(__file__), "..")
 MAX_LENGTH = 128
-CHECKPOINTS_DIR = os.path.join(os.path.dirname(__file__), "..", "checkpoints")
-os.makedirs(CHECKPOINTS_DIR, exist_ok=True)
-
-SAVE_DIR = os.path.join(os.path.dirname(__file__), "..")
 
 
 def postprocess_text(preds, labels):
@@ -134,7 +131,11 @@ def data_collator(tokenizer, features):
     return batch
 
 
-_DATASETS = {"coco": get_coco_dataset, "flickr": get_flickr_dataset}
+_DATASETS = {
+    "coco": get_coco_dataset,
+    "flickr": get_flickr_dataset,
+    "textcaps": get_textcaps_dataset,
+}
 
 
 def parse_args():
@@ -142,6 +143,28 @@ def parse_args():
         description="Train a Vision Encoder Decoder Model",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
+
+    parser.add_argument(
+        "--save-dir",
+        default=ROOT_DIR,
+        type=str,
+        help="Save dir",
+    )
+
+    parser.add_argument(
+        "--cache-dir",
+        default=os.path.join(ROOT_DIR, "cache"),
+        type=str,
+        help="Cache dir",
+    )
+
+    parser.add_argument(
+        "--checkpoints-dir",
+        default=os.path.join(ROOT_DIR, "checkpoints"),
+        type=str,
+        help="Checkpoints dir",
+    )
+
     parser.add_argument(
         "--encoder-model",
         default="google/vit-base-patch16-224-in21k",
@@ -168,8 +191,8 @@ def parse_args():
     )
     parser.add_argument(
         "--dataset",
-        default="coco",
-        choices=["coco", "flickr", "both"],
+        default="both",
+        choices=["coco", "textcaps", "flickr", "all"],
         help="Dataset to use for training",
     )
     return parser.parse_args()
@@ -198,30 +221,40 @@ def train(args):
     model.config.pad_token_id = tokenizer.pad_token_id
 
     save_path = os.path.join(
-        SAVE_DIR,
+        args.save_dir,
         f"{args.encoder_model.split('/')[-1]}-{args.decoder_model.split('/')[-1]}",
     )
 
-    if args.dataset == "both":
-        ds = _DATASETS["coco"](args.feature_extractor_model, args.decoder_model)
-        ds2 = _DATASETS["flickr"](args.feature_extractor_model, args.decoder_model)
+    if args.dataset == "all":
+        datasets = []
+        for get_dataset in _DATASETS.values():
+            datasets.append(
+                get_dataset(
+                    args.feature_extractor_model, args.decoder_model, args.cache_dir
+                )
+            )
         combined = DatasetDict()
-        for split in ds.keys():
-            combined[split] = concatenate_datasets([ds[split], ds2[split]])
+        for split in datasets[0].keys():
+            combined[split] = concatenate_datasets([ds[split] for ds in datasets])
+
         ds = combined.shuffle(seed=42)
     else:
-        ds = _DATASETS[args.dataset](args.feature_extractor_model, args.decoder_model)
+        ds = _DATASETS[args.dataset](
+            args.feature_extractor_model, args.decoder_model, args.cache_dir
+        )
+
+    os.makedirs(args.checkpoints_dir, exist_ok=True)
 
     training_args = Seq2SeqTrainingArguments(
         predict_with_generate=True,
         evaluation_strategy="epoch",
         per_device_train_batch_size=4,
         per_device_eval_batch_size=4,
-        output_dir=CHECKPOINTS_DIR,
+        output_dir=args.checkpoints_dir,
         save_total_limit=10,
     )
 
-    last_checkpoint = get_last_checkpoint(CHECKPOINTS_DIR)
+    last_checkpoint = get_last_checkpoint(args.checkpoints_dir)
 
     trainer = Seq2SeqTrainer(
         model=model,

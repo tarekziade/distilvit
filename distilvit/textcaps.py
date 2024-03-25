@@ -1,5 +1,5 @@
 """
-Tokenizes the Flickr30k dataset
+Tokenizes the TextCaps dataset
 """
 from datasets import load_dataset, load_from_disk, concatenate_datasets
 from functools import partial
@@ -24,7 +24,7 @@ def preprocess_fn(
     examples,
 ):
     model_inputs = {}
-    captions = [cap[idx] for cap in examples["caption"]]
+    captions = [cap[idx] for cap in examples["caption_str"]]
     model_inputs["labels"] = tokenization_fn(tokenizer, captions)
 
     model_inputs["pixel_values"] = feature_extractor(
@@ -33,12 +33,13 @@ def preprocess_fn(
     return model_inputs
 
 
-def get_dataset(feature_extractor_model, text_decoder_model, cache_dir):
-    cached_ds = os.path.join(cache_dir, "coco")
+def get_dataset(feature_extractor_model, text_decoder_model):
+    cached_ds = os.path.join(cache_dir, "textcaps")
     if os.path.exists(cached_ds):
         return load_from_disk(cached_ds)
 
-    ds = load_dataset("nlphuji/flickr30k", split="test")
+    ds = load_dataset("lmms-lab/TextCaps", split="train")
+
     feature_extractor = AutoFeatureExtractor.from_pretrained(feature_extractor_model)
     tokenizer = AutoTokenizer.from_pretrained(text_decoder_model)
     tokenizer.pad_token = tokenizer.eos_token

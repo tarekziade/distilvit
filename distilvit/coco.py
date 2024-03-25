@@ -55,8 +55,6 @@ urls = [
 ]
 
 COCO_DIR = os.path.join(os.path.dirname(__file__), "..", "coco")
-CACHED_DS = "/media/user/Extreme SSD/cache/coco"
-# os.path.join(os.path.dirname(__file__), "..", "cache", "coco")
 MAX_LENGTH = 128
 CHECKPOINTS_DIR = os.path.join(os.path.dirname(__file__), "checkpoints")
 SAVE_PATH = "./distilvit"
@@ -101,13 +99,14 @@ def preprocess_fn(
     return model_inputs
 
 
-def get_dataset(feature_extractor_model, text_decoder_model):
+def get_dataset(feature_extractor_model, text_decoder_model, cache_dir):
     """Downloads the COCO dataset and tokenizes it.
 
     The result is saved on disk so we can reuse it.
     """
-    if os.path.exists(CACHED_DS):
-        return load_from_disk(CACHED_DS)
+    cached_ds = os.path.join(cache_dir, "coco")
+    if os.path.exists(cached_ds):
+        return load_from_disk(cached_ds)
 
     feature_extractor = AutoFeatureExtractor.from_pretrained(feature_extractor_model)
     tokenizer = AutoTokenizer.from_pretrained(text_decoder_model)
