@@ -3,19 +3,12 @@ Downloads COCO and creates a tokenized one with extracted features.
 """
 import requests
 import os
-from functools import partial
-from collections.abc import Mapping
 
 import nltk
-import numpy as np
 from PIL import Image
-from datasets import load_dataset, load_from_disk
+from datasets import load_dataset
 from tqdm import tqdm
-from transformers import (
-    AutoFeatureExtractor,
-    AutoTokenizer,
-)
-
+from distilvit.utils import DatasetTokenizer, cached_ds, ImagePreprocessor
 
 try:
     nltk.data.find("tokenizers/punkt")
@@ -55,62 +48,41 @@ urls = [
 ]
 
 COCO_DIR = os.path.join(os.path.dirname(__file__), "..", "coco")
-MAX_LENGTH = 128
-CHECKPOINTS_DIR = os.path.join(os.path.dirname(__file__), "checkpoints")
-SAVE_PATH = "./distilvit"
 
 
-def tokenization_fn(tokenizer, captions):
-    """Run tokenization on captions."""
-    labels = tokenizer(captions, padding="max_length", max_length=MAX_LENGTH).input_ids
-
-    return labels
-
-
-def extract_features(feature_extractor, image_paths):
-    images = []
-    for image_path in image_paths:
-        try:
-            images.append(Image.open(image_path).convert("RGB"))
-        except Exception:
-            pass
-
-    inputs = feature_extractor(images=images, return_tensors="pt")
-    for image in images:
-        image.close()
-    return inputs
-
-
-def preprocess_fn(
-    feature_extractor,
-    tokenizer,
-    examples,
-):
-    """Run tokenization + image feature extraction"""
-    image_paths = examples["image_path"]
-    captions = examples["caption"]
-    model_inputs = {}
-    model_inputs["labels"] = tokenization_fn(tokenizer, captions)
-    model_inputs["pixel_values"] = extract_features(
+class CocoImagePreprocessor(ImagePreprocessor):
+    def __init__(
+        self,
         feature_extractor,
-        image_paths,
-    )["pixel_values"]
+        tokenizer,
+        caption_column="caption",
+        image_column="image_path",
+    ):
+        self.base_feature_extractor = feature_extractor
+        self.tokenizer = tokenizer
+        self.caption_column = caption_column
+        self.image_column = image_column
 
-    return model_inputs
+    def feature_extractor(self, image_paths):
+        images = []
+        for image_path in image_paths:
+            try:
+                images.append(Image.open(image_path).convert("RGB"))
+            except Exception:
+                pass
+
+        inputs = self.base_feature_extractor(images=images, return_tensors="pt")
+        for image in images:
+            image.close()
+        return inputs
 
 
-def get_dataset(feature_extractor_model, text_decoder_model, cache_dir):
+@cached_ds("coco")
+def get_dataset(feature_extractor_model, text_decoder_model):
     """Downloads the COCO dataset and tokenizes it.
 
     The result is saved on disk so we can reuse it.
     """
-    cached_ds = os.path.join(cache_dir, "coco")
-    if os.path.exists(cached_ds):
-        return load_from_disk(cached_ds)
-
-    feature_extractor = AutoFeatureExtractor.from_pretrained(feature_extractor_model)
-    tokenizer = AutoTokenizer.from_pretrained(text_decoder_model)
-    tokenizer.pad_token = tokenizer.eos_token
 
     for url in urls:
         print(f"Downloading {url}...")
@@ -123,12 +95,14 @@ def get_dataset(feature_extractor_model, text_decoder_model, cache_dir):
         data_dir=COCO_DIR,
         trust_remote_code=True,
     )
-    ds = ds.map(
-        function=partial(preprocess_fn, feature_extractor, tokenizer),
-        batched=True,
-        remove_columns=ds["train"].column_names,
-    )
-    # save the mapped dataset so we can reuse it
-    ds.save_to_disk(CACHED_DS)
 
+    ds_tokenizer = DatasetTokenizer(
+        feature_extractor_model,
+        text_decoder_model,
+        caption_column="caption",
+        image_column="image_path",
+        image_preprocessor_cls=CocoImagePreprocessor,
+    )
+
+    ds = ds_tokenizer(ds)
     return ds

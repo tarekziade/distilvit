@@ -1,10 +1,10 @@
 import time
 import pprint
 from transformers.utils import logging
+from transformers import pipeline
 
 logging.set_verbosity(40)
 
-from transformers import pipeline
 
 IMAGES = [
     "https://huggingface.co/datasets/mishig/sample_images/resolve/main/airport.jpg",
