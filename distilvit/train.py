@@ -13,6 +13,7 @@ from transformers import (
     VisionEncoderDecoderModel,
     AutoFeatureExtractor,
     AutoTokenizer,
+    TrainerCallback,
 )
 from transformers.trainer_utils import get_last_checkpoint
 from datasets import concatenate_datasets, DatasetDict
@@ -43,6 +44,17 @@ ROOT_DIR = os.path.join(os.path.dirname(__file__), "..")
 MAX_LENGTH = 128
 
 
+class MetricsLoggerCallback(TrainerCallback):
+    def __init__(self, file_path):
+        super().__init__()
+        self.file_path = file_path
+
+    def on_evaluate(self, args, state, control, metrics=None, **kwargs):
+        if metrics:
+            with open(self.file_path, "a") as f:
+                f.write(f"{metrics}\n")
+
+
 def postprocess_text(preds, labels):
     preds = [pred.strip() for pred in preds]
     labels = [label.strip() for label in labels]
@@ -52,7 +64,7 @@ def postprocess_text(preds, labels):
     return preds, labels
 
 
-def compute_metrics(tokenizer, metric, eval_preds):
+def compute_metrics(tokenizer, rouge, meteor, eval_preds):
     preds, labels = eval_preds
     if isinstance(preds, tuple):
         preds = preds[0]
@@ -60,10 +72,14 @@ def compute_metrics(tokenizer, metric, eval_preds):
     labels = np.where(labels != -100, labels, tokenizer.pad_token_id)
     decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
     decoded_preds, decoded_labels = postprocess_text(decoded_preds, decoded_labels)
-    result = metric.compute(
+    result = rouge.compute(
         predictions=decoded_preds, references=decoded_labels, use_stemmer=True
     )
     result = {k: round(v * 100, 4) for k, v in result.items()}
+    result["meteor"] = meteor.compute(
+        predictions=decoded_preds, references=decoded_labels
+    )["meteor"]
+
     prediction_lens = [
         np.count_nonzero(pred != tokenizer.pad_token_id) for pred in preds
     ]
@@ -199,7 +215,9 @@ def parse_args():
 
 
 def train(args):
-    metric = evaluate.load("rouge")
+    rouge = evaluate.load("rouge")
+    meteor = evaluate.load("meteor")
+
     feature_extractor = AutoFeatureExtractor.from_pretrained(
         args.feature_extractor_model
     )
@@ -255,15 +273,19 @@ def train(args):
     )
 
     last_checkpoint = get_last_checkpoint(args.checkpoints_dir)
+    metrics_logger_callback = MetricsLoggerCallback(
+        os.path.join(args.checkpoints_dir, "metrics.txt")
+    )
 
     trainer = Seq2SeqTrainer(
         model=model,
         tokenizer=feature_extractor,
         args=training_args,
-        compute_metrics=partial(compute_metrics, tokenizer, metric),
+        compute_metrics=partial(compute_metrics, tokenizer, rouge, meteor),
         train_dataset=ds["train"],
         eval_dataset=ds["validation"],
         data_collator=partial(data_collator, tokenizer),
+        callbacks=[metrics_logger_callback],
     )
     if last_checkpoint is not None:
         trainer.train(resume_from_checkpoint=last_checkpoint)
