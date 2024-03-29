@@ -17,6 +17,7 @@ from transformers import (
 )
 from transformers.trainer_utils import get_last_checkpoint
 from datasets import concatenate_datasets, DatasetDict
+from transformers.trainer_callback import EarlyStoppingCallback
 
 
 if torch.cuda.is_available():
@@ -266,8 +267,9 @@ def train(args):
     training_args = Seq2SeqTrainingArguments(
         predict_with_generate=True,
         evaluation_strategy="epoch",
-        per_device_train_batch_size=4,
-        per_device_eval_batch_size=4,
+        per_device_train_batch_size=8,
+        per_device_eval_batch_size=8,
+        num_train_epochs=10,
         output_dir=args.checkpoints_dir,
         save_total_limit=10,
     )
@@ -285,7 +287,10 @@ def train(args):
         train_dataset=ds["train"],
         eval_dataset=ds["validation"],
         data_collator=partial(data_collator, tokenizer),
-        callbacks=[metrics_logger_callback],
+        callbacks=[
+            EarlyStoppingCallback(early_stopping_patience=3),
+            metrics_logger_callback,
+        ],
     )
     if last_checkpoint is not None:
         trainer.train(resume_from_checkpoint=last_checkpoint)

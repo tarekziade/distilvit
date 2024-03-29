@@ -1,6 +1,11 @@
 # distilvit
 
-Same as https://huggingface.co/nlpconnect/vit-gpt2-image-captioning but with Distil-GPT-2
+Fine-tune a Visual Encoder Decoder model for image captioning.
+
+Results:
+
+- ViT Base + DistilGPT2: https://huggingface.co/tarekziade/distilvit
+- DeiT Tiny + DistilGPT2: https://huggingface.co/tarekziade/deit-tiny-distilgpt2
 
 The train script is inspired from https://ankur3107.github.io/blogs/the-illustrated-image-captioning-using-transformers/#references
 
@@ -12,13 +17,13 @@ bin/pip install -r requirements.txt
 bin/pip install -e .
 ```
 
-To train against the 270k+ image & caption pairs (COCO and Flickr30k), make sure you have 2T of disk space, and run:
+To train against all image & caption pairs (COCO, Flickr30k and TextCaps), make sure you have 2T of disk space, and run:
 
 ```
-bin/train --dataset both
+bin/train --dataset all
 ```
 
-Once trained, you can try it out with the test script, to compare its output with `vit-gpt2-image-captioning`:
+Once trained, you can try it out with the test script:
 
 ```
 bin/python distilvit/infere.py
